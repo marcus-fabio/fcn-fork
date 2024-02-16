@@ -21,10 +21,10 @@ import h5py
 
 from models.load_model import load_model
 
-# Load model, including pre trained weights and compile
+# # Load model, including pre trained weights and compile
 model_input = 1953
-print(f"\nLoad FCN model: {model_input}")
-model = load_model(model_input, FULLCONV=False, training=True)
+# print(f"\nLoad FCN model: {model_input}")
+# model = load_model(model_input, FULLCONV=False, training=True)
 
 # # Initialize W&B
 # wandb.init(project='fcn_retraining')
@@ -111,7 +111,7 @@ def test_save_frames_annotations():
 
 # Flaky plugin to retry training if it fails
 @flaky(max_runs=230, min_passes=1)
-def test_train_3():
+def test_train():
     audio_files_list = sorted(os.listdir(audio_folder))
     annotation_files_list = sorted(os.listdir(annotation_folder))
 
@@ -161,6 +161,10 @@ def test_train_3():
 
             # Train the model
             try:
+                # Load model, including pre trained weights and compile
+                print(f"Load FCN model: {model_input}")
+                model = load_model(model_input, FULLCONV=False, training=True)
+
                 print("Training the model")
                 model.fit(
                     x_train, y_train,
@@ -181,117 +185,12 @@ def test_train_3():
                 # Clear the Keras session to release resources
                 print("Cleanup")
                 tf.keras.backend.clear_session()
-                del x_train, x_val, x_test, y_train, y_val, y_test
+                del x_train, x_val, x_test, y_train, y_val, y_test, model
 
                 # Trigger garbage collection
                 gc.collect()
 
         del frames, y_vectors
-
-        # Save audio file name used to train
-        with open(audio_files_used_to_train, 'a', newline='') as csv_file:
-            csv_writer = csv.writer(csv_file)
-            csv_writer.writerow([audio_file])
-
-
-# Flaky plugin to retry training if it fails
-@flaky(max_runs=230, min_passes=1)
-def test_train_2():
-    audio_files_list = sorted(os.listdir(audio_folder))
-    annotation_files_list = sorted(os.listdir(annotation_folder))
-
-    # Remove audio files already used from training dataset
-    try:
-        with open(audio_files_used_to_train, 'r') as file:
-            audio_files_used = [line.strip() for line in file]
-
-        audio_files_list, annotation_files_list = \
-            zip(*[(audio_file, annotation_file)
-                  for audio_file, annotation_file
-                  in zip(audio_files_list, annotation_files_list)
-                  if not any(audio_file_used in audio_file for audio_file_used in audio_files_used)])
-    except:
-        # Continue if no audio was used yet
-        pass
-
-    number_audio_files = len(audio_files_list)
-    print("\nNumber of audio files:", number_audio_files)
-
-    global retry
-    print("\nTest attempt:", retry)
-    retry += 1
-
-    files = list(zip(audio_files_list, annotation_files_list))
-    random.shuffle(files)
-
-    for audio_file, annotation_file in files:
-        audio_path = os.path.join(audio_folder, audio_file)
-        annotation_path = os.path.join(annotation_folder, annotation_file)
-
-        print(f"Loading audio: {audio_file}")
-        audio_data = get_audio(audio_path, model_input)
-
-        print("\nLoading frequency annotations")
-        annotations = pd.read_csv(annotation_path, header=None, names=['timestamp', 'frequency'])
-
-        # Split audio data into frames of 1953 samples
-        print("Splitting audio in frames")
-        frames = librosa.util.frame(audio_data, model_input, hop_length, axis=0)
-        del audio_data
-
-        # Filter frames to get correct annotation for each one
-        print("Sync frames with time annotations")
-        times = annotations['timestamp'].values
-        frame_indexes = librosa.time_to_frames(times, model_srate, hop_length)
-        frames = frames[frame_indexes, :]
-
-        # normalize each frame -- this is expected by the model
-        print("Normalizing frames")
-        frames -= np.mean(frames, axis=1)[:, np.newaxis]
-        frames /= np.clip(np.std(frames, axis=1)[:, np.newaxis], 1e-8, None)
-
-        # Get vector targets for each frequency from annotation
-        print("Get vector targets for each frequency from annotation")
-        frequencies = annotations['frequency'].values
-        y_vectors = f0_to_target_vector(frequencies)
-
-        # Create a KFold object
-        kf = KFold(n_splits=num_folds, shuffle=True, random_state=42)
-
-        # Loop over folds
-        for fold_idx, (train_index, test_index) in enumerate(kf.split(frames)):
-            print(f"Fold {fold_idx + 1}/{num_folds}")
-
-            x_train, x_test = frames[train_index], frames[test_index]
-            y_train, y_test = y_vectors[train_index], y_vectors[test_index]
-
-            # Split the training set into train and validation (60/20/20 split)
-            x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.25, random_state=42)
-
-            # Train the model
-            try:
-                print("Training the model")
-                model.fit(
-                    x_train, y_train,
-                    steps_per_epoch=steps_per_epoch,
-                    batch_size=batch_size,
-                    validation_data=(x_val, y_val),
-                    # callbacks=[early_stopping, checkpoint, wandb_callback]
-                    callbacks=[early_stopping, checkpoint]
-                )
-
-                # Evaluate the model on the test set
-                print("\nEvaluating the model")
-                test_loss = model.evaluate(x_test, y_test)
-                print(f"Test Loss: {test_loss}")
-            except:
-                raise Exception("Exception during model training")
-            finally:
-                # Clear the Keras session to release resources
-                tf.keras.backend.clear_session()
-                del x_train, x_val, x_test, y_train, y_val, y_test
-
-        del frames
 
         # Save audio file name used to train
         with open(audio_files_used_to_train, 'a', newline='') as csv_file:
