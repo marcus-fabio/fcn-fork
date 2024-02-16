@@ -299,17 +299,6 @@ def test_train_2():
             csv_writer.writerow([audio_file])
 
 
-def test_train():
-    # Create a data generator for training
-    train_data_gen = data_generator(audio_files_list, annotation_files_list)
-    model.fit(train_data_gen, steps_per_epoch=steps_per_epoch, epochs=1)
-
-    # Save the new weights with a unique identifier (e.g., timestamp)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    new_weights_file = f'{timestamp}.h5'
-    model.save_weights(new_weights_file)
-
-
 def data_generator(audio_files, annotation_files):
     files = list(zip(audio_files, annotation_files))
     random.shuffle(files)
