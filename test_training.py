@@ -55,26 +55,6 @@ annotation_folder = 'MDB-stem-synth/annotation_stems'
 frames_target_folder = "D:/MDB-stem-synth/frames_targets"
 target_vectors_numpy_folder = "MDB-stem-synth/target_vectors_numpy"
 
-audio_files_list = sorted(os.listdir(audio_folder))
-annotation_files_list = sorted(os.listdir(annotation_folder))
-
-# Remove audio files already used from training dataset
-try:
-    with open(audio_files_used_to_train, 'r') as file:
-        audio_files_used = [line.strip() for line in file]
-
-    audio_files_list, annotation_files_list = \
-        zip(*[(audio_file, annotation_file)
-              for audio_file, annotation_file
-              in zip(audio_files_list, annotation_files_list)
-              if not any(audio_file_used in audio_file for audio_file_used in audio_files_used)])
-except:
-    # Continue if no audio was used yet
-    pass
-
-number_audio_files = len(audio_files_list)
-print("Number of audio files:", number_audio_files)
-
 
 def test_save_frames_annotations():
     audio_files = sorted(os.listdir(audio_folder))
@@ -130,10 +110,30 @@ def test_save_frames_annotations():
 
 
 # Flaky plugin to retry training if it fails
-@flaky(max_runs=number_audio_files, min_passes=1)
+@flaky(max_runs=230, min_passes=1)
 def test_train_3():
+    audio_files_list = sorted(os.listdir(audio_folder))
+    annotation_files_list = sorted(os.listdir(annotation_folder))
+
+    # Remove audio files already used from training dataset
+    try:
+        with open(audio_files_used_to_train, 'r') as file:
+            audio_files_used = [line.strip() for line in file]
+
+        audio_files_list, annotation_files_list = \
+            zip(*[(audio_file, annotation_file)
+                  for audio_file, annotation_file
+                  in zip(audio_files_list, annotation_files_list)
+                  if not any(audio_file_used in audio_file for audio_file_used in audio_files_used)])
+    except:
+        # Continue if no audio was used yet
+        pass
+
+    number_audio_files = len(audio_files_list)
+    print("\nNumber of audio files:", number_audio_files)
+
     global retry
-    print("\nTest attempt:", retry)
+    print("Test attempt:", retry)
     retry += 1
 
     files = list(audio_files_list)
@@ -195,8 +195,28 @@ def test_train_3():
 
 
 # Flaky plugin to retry training if it fails
-@flaky(max_runs=number_audio_files, min_passes=1)
+@flaky(max_runs=230, min_passes=1)
 def test_train_2():
+    audio_files_list = sorted(os.listdir(audio_folder))
+    annotation_files_list = sorted(os.listdir(annotation_folder))
+
+    # Remove audio files already used from training dataset
+    try:
+        with open(audio_files_used_to_train, 'r') as file:
+            audio_files_used = [line.strip() for line in file]
+
+        audio_files_list, annotation_files_list = \
+            zip(*[(audio_file, annotation_file)
+                  for audio_file, annotation_file
+                  in zip(audio_files_list, annotation_files_list)
+                  if not any(audio_file_used in audio_file for audio_file_used in audio_files_used)])
+    except:
+        # Continue if no audio was used yet
+        pass
+
+    number_audio_files = len(audio_files_list)
+    print("\nNumber of audio files:", number_audio_files)
+
     global retry
     print("\nTest attempt:", retry)
     retry += 1
