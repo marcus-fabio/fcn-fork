@@ -102,3 +102,4 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+/models/FCN_1953/best_weights.h5

@@ -7,6 +7,23 @@ article: "Fully-Convolutional Network for Pitch Estimation of Speech Signals", 2
 modified by Luc Ardaillon: 16/04/2019
 """
 
+import tensorflow as tf
+
+# In your code, before creating any TensorFlow operations
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        print("Setting GPU usage")
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+            print("GPU Name:", gpu.name)
+            print("GPU Device Type:", tf.test.gpu_device_name())
+            print("GPU Device name:", tf.config.experimental.get_device_details(gpu)['device_name'])
+            print("GPU device compute capability:", tf.config.experimental.get_device_details(gpu)['compute_capability'])
+    except RuntimeError as e:
+        print(e)
+
+
 # the model is trained on 8kHz audio
 model_srate = 8000
 
@@ -55,6 +72,7 @@ def build_model(learning_rate=0.0002, weightsFile=None, inputSize=1953, dropout 
     model = Model(inputs=x, outputs=y)
 
     if(weightsFile is not None):  # if restarting learning from a checkpoint
+        print(f"\nLoading pretrained weights: {weightsFile}")
         model.load_weights(weightsFile)
 
     if(training):
