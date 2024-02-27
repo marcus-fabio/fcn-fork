@@ -82,6 +82,7 @@ celerybeat-schedule
 *.sage.py
 
 # Environments
+.idea
 .env
 .venv
 env/
@@ -103,3 +104,14 @@ venv.bak/
 # mypy
 .mypy_cache/
 /models/FCN_1953/best_weights.h5
+/wandb/
+/MDB-stem-synth/
+/crepe_results/
+/crepe_results_10ms/
+/crepe_results_old/
+/raw_results/
+/fcn_results/
+/mir_results/
+/annotations/
+/examples/DTB/PAN-synth/audio/noTransp/f1_row_straight.wav
+/examples/DTB/PAN-synth/audio/noTransp/f1_row_vibrato.wav
