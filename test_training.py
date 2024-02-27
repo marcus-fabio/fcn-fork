@@ -14,6 +14,20 @@ import tensorflow as tf
 from flaky import flaky
 import h5py
 
+# In your code, before creating any TensorFlow operations
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        print("Setting GPU usage")
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+            print("GPU Name:", gpu.name)
+            print("GPU Device Type:", tf.test.gpu_device_name())
+            print("GPU Device name:", tf.config.experimental.get_device_details(gpu)['device_name'])
+            print("GPU device compute capability:", tf.config.experimental.get_device_details(gpu)['compute_capability'])
+    except RuntimeError as e:
+        print(e)
+
 # os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 
 # import wandb
