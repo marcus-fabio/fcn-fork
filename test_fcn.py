@@ -35,7 +35,7 @@ def test_run_prediction():
 
 def test_fragment():
     evaluate(filename='allemande_first_fragment_nicolet',
-             confidence_levels=np.linspace(0, 0.9, 10), folder="before", force_run=True)
+             confidence_levels=np.linspace(0, 0.9, 10), folder="after", force_run=False)
 
 
 def test_all():
@@ -70,7 +70,7 @@ def evaluate(filename="all",
 
         # Get original dataset annotation file
         annotation = f"{ground_truth_path}{file}"
-        onset, offset, freq, _ = ld.ground_truth(annotation, 10e-3)
+        onset, offset, freq, _ = ld.ground_truth(annotation)
 
         # Generate new annotation from original annotation file
         ann_file = f"./annotations/{file}_annotation.csv"

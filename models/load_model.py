@@ -25,8 +25,8 @@ def load_model(modelName, from_json = False, FULLCONV = True, training=False):
         modelDir = os.path.join(curDir, 'FCN_1953')
         modelFile = os.path.join(modelDir, 'model.json')
         # weightsFile = os.path.join(modelDir, 'best_weights.h5') if training else os.path.join(modelDir, 'weights.h5')
-        # weightsFile = os.path.join(modelDir, 'best_weights.h5')
-        weightsFile = os.path.join(modelDir, 'weights.h5')
+        weightsFile = os.path.join(modelDir, 'new_weights.h5')
+        # weightsFile = os.path.join(modelDir, 'weights.h5')
         inputSize = 1953
         from models.FCN_1953.core import build_model
     elif str(modelName) == 'CREPE':

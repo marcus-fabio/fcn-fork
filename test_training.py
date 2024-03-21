@@ -30,8 +30,8 @@ if gpus:
 
 # os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 
-import wandb
-from wandb.keras import WandbCallback
+# import wandb
+# from wandb.keras import WandbCallback
 
 from models.load_model import load_model
 
@@ -41,12 +41,11 @@ print(f"\nLoad FCN model: {model_input}")
 model = load_model(model_input, FULLCONV=False, training=True)
 
 # Initialize W&B
-wandb.init(project='fcn_retraining')
-wandb_callback = WandbCallback()
+# wandb.init(project='fcn_retraining', resume=True)
+# wandb_callback = WandbCallback()
 
 # Set up early stopping callback
-early_stopping = EarlyStopping(monitor='loss', patience=32,
-                               restore_best_weights=True, min_delta=0.001)
+early_stopping = EarlyStopping(monitor='loss', patience=32, min_delta=0.001)
 
 # Set up ModelCheckpoint callback to save the best weights
 checkpoint_path = f"models/FCN_1953/new_weights.h5"
@@ -69,6 +68,45 @@ annotation_folder = 'MDB-stem-synth/annotation_stems'
 frames_target_folder = "D:/MDB-stem-synth/frames_targets"
 target_vectors_numpy_folder = "MDB-stem-synth/target_vectors_numpy"
 
+files_to_train = [
+    'MusicDelta_Beethoven_STEM_07.RESYN.wav',
+    'MusicDelta_ChineseChaoZhou_STEM_02.RESYN.wav',
+    'MusicDelta_FunkJazz_STEM_02.RESYN.wav',
+    'MusicDelta_Beethoven_STEM_09.RESYN.wav',
+    'MusicDelta_Hendrix_STEM_02.RESYN.wav',
+    'MusicDelta_InTheHalloftheMountainKing_STEM_04.RESYN.wav',
+    'MusicDelta_ChineseDrama_STEM_02.RESYN.wav',
+    'MusicDelta_Beethoven_STEM_06.RESYN.wav',
+    'MusicDelta_Beethoven_STEM_16.RESYN.wav',
+    'MusicDelta_ChineseChaoZhou_STEM_01.RESYN.wav',
+    'MusicDelta_Beethoven_STEM_14.RESYN.wav',
+    'MusicDelta_Rockabilly_STEM_05.RESYN.wav',
+    'MusicDelta_Rock_STEM_05.RESYN.wav',
+    'MusicDelta_ChineseJiangNan_STEM_02.RESYN.wav',
+    'MusicDelta_Beatles_STEM_08.RESYN.wav',
+    'MusicDelta_ChineseDrama_STEM_01.RESYN.wav',
+    'MusicDelta_InTheHalloftheMountainKing_STEM_10.RESYN.wav',
+    'MusicDelta_Britpop_STEM_07.RESYN.wav',
+    'MusicDelta_InTheHalloftheMountainKing_STEM_07.RESYN.wav',
+    'TheSoSoGlos_Emergency_STEM_05.RESYN.wav',
+    'MusicDelta_LatinJazz_STEM_04.RESYN.wav',
+    'AClassicEducation_NightOwl_STEM_01.RESYN.wav',
+    'BigTroubles_Phantom_STEM_01.RESYN.wav',
+    'BigTroubles_Phantom_STEM_04.RESYN.wav',
+    'ClaraBerryAndWooldog_WaltzForMyVictims_STEM_02.RESYN.wav',
+    'MusicDelta_Gospel_STEM_06.RESYN.wav',
+    'MusicDelta_Vivaldi_STEM_01.RESYN.wav',
+    'EthanHein_BluesForNofi_STEM_02.RESYN.wav',
+    'MusicDelta_Country2_STEM_02.RESYN.wav',
+    'MatthewEntwistle_DontYouEver_STEM_01.RESYN.wav',
+    'MusicDelta_SwingJazz_STEM_04.RESYN.wav',
+    'MusicDelta_Reggae_STEM_02.RESYN.wav',
+    'MusicDelta_CoolJazz_STEM_04.RESYN.wav',
+    'InvisibleFamiliars_DisturbingWildlife_STEM_01.RESYN.wav',
+    'MusicDelta_Punk_STEM_02.RESYN.wav',
+    'MusicDelta_Zeppelin_STEM_01.RESYN.wav',
+    'NightPanther_Fire_STEM_07.RESYN.wav',
+]
 
 def test_save_frames_annotations():
     audio_files = sorted(os.listdir(audio_folder))
@@ -147,7 +185,8 @@ def test_train():
     files = list(audio_files_list)
     random.shuffle(files)
 
-    for audio_file in files:
+    # for audio_file in files:
+    for audio_file in files_to_train:
         print("\nNumber of audio files remaining:", number_audio_files)
         audio_name = audio_file.replace(".wav", "")
 
@@ -176,8 +215,9 @@ def test_train():
                     steps_per_epoch=steps_per_epoch,
                     batch_size=batch_size,
                     validation_data=(x_val, y_val),
-                    callbacks=[early_stopping, checkpoint, wandb_callback]
-                    # callbacks=[early_stopping, checkpoint]
+                    # callbacks=[early_stopping, checkpoint, wandb_callback]
+                    callbacks=[early_stopping, checkpoint]
+                    # callbacks=[early_stopping]
                 )
 
                 # Evaluate the model on the test set
@@ -383,3 +423,13 @@ def load_data_from_hdf5(hdf5_file, audio_name):
             return frames, y_vectors
         else:
             return None, None
+
+
+def test_save_audio_list():
+    audio_files_list = sorted(os.listdir(audio_folder))
+
+    # Write the filenames to a CSV file
+    with open('audio_list.csv', 'w', newline='') as csvfile:
+        csv_writer = csv.writer(csvfile)
+        for filename in audio_files_list:
+            csv_writer.writerow([filename])
