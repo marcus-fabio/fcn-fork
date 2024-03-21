@@ -30,26 +30,26 @@ if gpus:
 
 # os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 
-# import wandb
-# from wandb.keras import WandbCallback
+import wandb
+from wandb.keras import WandbCallback
 
 from models.load_model import load_model
 
-# # Load model, including pre trained weights and compile
+# Load model, including pre trained weights and compile
 model_input = 1953
-# print(f"\nLoad FCN model: {model_input}")
-# model = load_model(model_input, FULLCONV=False, training=True)
+print(f"\nLoad FCN model: {model_input}")
+model = load_model(model_input, FULLCONV=False, training=True)
 
-# # Initialize W&B
-# wandb.init(project='fcn_retraining')
-# wandb_callback = WandbCallback()
+# Initialize W&B
+wandb.init(project='fcn_retraining')
+wandb_callback = WandbCallback()
 
 # Set up early stopping callback
 early_stopping = EarlyStopping(monitor='loss', patience=32,
                                restore_best_weights=True, min_delta=0.001)
 
 # Set up ModelCheckpoint callback to save the best weights
-checkpoint_path = f"models/FCN_1953/best_weights.h5"
+checkpoint_path = f"models/FCN_1953/new_weights.h5"
 checkpoint = ModelCheckpoint(checkpoint_path, monitor='val_loss',
                              save_best_only=True, mode='min',
                              restore_best_weights=True)
@@ -124,7 +124,7 @@ def test_save_frames_annotations():
 
 
 # Flaky plugin to retry training if it fails
-@flaky(max_runs=230, min_passes=1)
+# @flaky(max_runs=230, min_passes=1)
 def test_train():
     audio_files_list = sorted(os.listdir(audio_folder))
     annotation_files_list = sorted(os.listdir(annotation_folder))
@@ -144,16 +144,11 @@ def test_train():
         pass
 
     number_audio_files = len(audio_files_list)
-    print("\nNumber of audio files:", number_audio_files)
-
-    global retry
-    print("Test attempt:", retry)
-    retry += 1
-
     files = list(audio_files_list)
     random.shuffle(files)
 
     for audio_file in files:
+        print("\nNumber of audio files remaining:", number_audio_files)
         audio_name = audio_file.replace(".wav", "")
 
         # Load frames and annotations for training
@@ -175,18 +170,14 @@ def test_train():
 
             # Train the model
             try:
-                # Load model, including pre trained weights and compile
-                print(f"Load FCN model: {model_input}")
-                model = load_model(model_input, FULLCONV=False, training=True)
-
                 print("Training the model")
                 model.fit(
                     x_train, y_train,
                     steps_per_epoch=steps_per_epoch,
                     batch_size=batch_size,
                     validation_data=(x_val, y_val),
-                    # callbacks=[early_stopping, checkpoint, wandb_callback]
-                    callbacks=[early_stopping, checkpoint]
+                    callbacks=[early_stopping, checkpoint, wandb_callback]
+                    # callbacks=[early_stopping, checkpoint]
                 )
 
                 # Evaluate the model on the test set
@@ -199,7 +190,7 @@ def test_train():
                 # Clear the Keras session to release resources
                 print("Cleanup")
                 tf.keras.backend.clear_session()
-                del x_train, x_val, x_test, y_train, y_val, y_test, model
+                del x_train, x_val, x_test, y_train, y_val, y_test
 
                 # Trigger garbage collection
                 gc.collect()
@@ -210,6 +201,8 @@ def test_train():
         with open(audio_files_used_to_train, 'a', newline='') as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow([audio_file])
+
+        number_audio_files -= 1
 
 
 def data_generator(audio_files, annotation_files):
