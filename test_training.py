@@ -61,6 +61,7 @@ step_size = 2.902
 hop_length = int(model_srate * step_size / 1000)
 num_folds = 5
 audio_files_used_to_train = "audio_files_used_to_train.csv"
+audio_list = "audio_list.csv"
 retry = 1
 
 audio_folder = 'MDB-stem-synth/audio_stems'
@@ -68,57 +69,15 @@ annotation_folder = 'MDB-stem-synth/annotation_stems'
 frames_target_folder = "D:/MDB-stem-synth/frames_targets"
 target_vectors_numpy_folder = "MDB-stem-synth/target_vectors_numpy"
 
-files_to_train = [
-    'MusicDelta_Beethoven_STEM_07.RESYN.wav',
-    'MusicDelta_ChineseChaoZhou_STEM_02.RESYN.wav',
-    'MusicDelta_FunkJazz_STEM_02.RESYN.wav',
-    'MusicDelta_Beethoven_STEM_09.RESYN.wav',
-    'MusicDelta_Hendrix_STEM_02.RESYN.wav',
-    'MusicDelta_InTheHalloftheMountainKing_STEM_04.RESYN.wav',
-    'MusicDelta_ChineseDrama_STEM_02.RESYN.wav',
-    'MusicDelta_Beethoven_STEM_06.RESYN.wav',
-    'MusicDelta_Beethoven_STEM_16.RESYN.wav',
-    'MusicDelta_ChineseChaoZhou_STEM_01.RESYN.wav',
-    'MusicDelta_Beethoven_STEM_14.RESYN.wav',
-    'MusicDelta_Rockabilly_STEM_05.RESYN.wav',
-    'MusicDelta_Rock_STEM_05.RESYN.wav',
-    'MusicDelta_ChineseJiangNan_STEM_02.RESYN.wav',
-    'MusicDelta_Beatles_STEM_08.RESYN.wav',
-    'MusicDelta_ChineseDrama_STEM_01.RESYN.wav',
-    'MusicDelta_InTheHalloftheMountainKing_STEM_10.RESYN.wav',
-    'MusicDelta_Britpop_STEM_07.RESYN.wav',
-    'MusicDelta_InTheHalloftheMountainKing_STEM_07.RESYN.wav',
-    'TheSoSoGlos_Emergency_STEM_05.RESYN.wav',
-    'MusicDelta_LatinJazz_STEM_04.RESYN.wav',
-    'AClassicEducation_NightOwl_STEM_01.RESYN.wav',
-    'BigTroubles_Phantom_STEM_01.RESYN.wav',
-    'BigTroubles_Phantom_STEM_04.RESYN.wav',
-    'ClaraBerryAndWooldog_WaltzForMyVictims_STEM_02.RESYN.wav',
-    'MusicDelta_Gospel_STEM_06.RESYN.wav',
-    'MusicDelta_Vivaldi_STEM_01.RESYN.wav',
-    'EthanHein_BluesForNofi_STEM_02.RESYN.wav',
-    'MusicDelta_Country2_STEM_02.RESYN.wav',
-    'MatthewEntwistle_DontYouEver_STEM_01.RESYN.wav',
-    'MusicDelta_SwingJazz_STEM_04.RESYN.wav',
-    'MusicDelta_Reggae_STEM_02.RESYN.wav',
-    'MusicDelta_CoolJazz_STEM_04.RESYN.wav',
-    'InvisibleFamiliars_DisturbingWildlife_STEM_01.RESYN.wav',
-    'MusicDelta_Punk_STEM_02.RESYN.wav',
-    'MusicDelta_Zeppelin_STEM_01.RESYN.wav',
-    'NightPanther_Fire_STEM_07.RESYN.wav',
-]
 
 def test_save_frames_annotations():
-    audio_files = sorted(os.listdir(audio_folder))
-    annotation_files = sorted(os.listdir(annotation_folder))
+    audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
+    num_files = len(audio_files_list)
 
-    files = list(zip(audio_files, annotation_files))
-    num_files = len(files)
-
-    for idx, (audio_file, annotation_file) in enumerate(files):
+    for idx, audio_file in enumerate(audio_files_list):
         audio_name = audio_file.replace(".wav", "")
         audio_path = os.path.join(audio_folder, audio_file)
-        annotation_path = os.path.join(annotation_folder, annotation_file)
+        annotation_path = os.path.join(annotation_folder, audio_file.replace(".wav", ".csv"))
 
         print(f"\nLoading audio: {audio_file} ({idx + 1}/{num_files})")
         audio_data = get_audio(audio_path, model_input)
@@ -164,26 +123,12 @@ def test_save_frames_annotations():
 # Flaky plugin to retry training if it fails
 # @flaky(max_runs=230, min_passes=1)
 def test_train():
-    audio_files_list = sorted(os.listdir(audio_folder))
-    annotation_files_list = sorted(os.listdir(annotation_folder))
+    audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
+    audio_files_used_list = pd.read_csv(audio_files_used_to_train, header=None, names=['audio_name'])['audio_name'].values
 
-    # Remove audio files already used from training dataset
-    try:
-        with open(audio_files_used_to_train, 'r') as file:
-            audio_files_used = [line.strip() for line in file]
-
-        audio_files_list, annotation_files_list = \
-            zip(*[(audio_file, annotation_file)
-                  for audio_file, annotation_file
-                  in zip(audio_files_list, annotation_files_list)
-                  if not any(audio_file_used in audio_file for audio_file_used in audio_files_used)])
-    except:
-        # Continue if no audio was used yet
-        pass
-
-    number_audio_files = len(audio_files_list)
-    files = list(audio_files_list)
-    random.shuffle(files)
+    # Get audio files not used yet
+    files_to_train = [audio for audio in audio_files_list if audio not in audio_files_used_list]
+    number_audio_files = len(files_to_train)
 
     # for audio_file in files:
     for audio_file in files_to_train:
@@ -420,7 +365,8 @@ def load_data_from_hdf5(hdf5_file, audio_name):
             group = hf[audio_name]
             frames = np.array(group['frames'])
             y_vectors = np.array(group['y_vectors'])
-            return frames, y_vectors
+            permutation = np.random.permutation(len(frames))
+            return frames[permutation], y_vectors[permutation]
         else:
             return None, None
 
