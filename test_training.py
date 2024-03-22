@@ -1,6 +1,5 @@
 import os
 import random
-from datetime import datetime
 import csv
 import gc
 
@@ -11,7 +10,6 @@ import librosa
 from sklearn.model_selection import train_test_split, KFold
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 import tensorflow as tf
-from flaky import flaky
 import h5py
 
 # In your code, before creating any TensorFlow operations
@@ -27,8 +25,6 @@ if gpus:
             print("GPU device compute capability:", tf.config.experimental.get_device_details(gpu)['compute_capability'])
     except RuntimeError as e:
         print(e)
-
-# os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 
 # import wandb
 # from wandb.keras import WandbCallback
@@ -67,7 +63,6 @@ retry = 1
 audio_folder = 'MDB-stem-synth/audio_stems'
 annotation_folder = 'MDB-stem-synth/annotation_stems'
 frames_target_folder = "D:/MDB-stem-synth/frames_targets"
-target_vectors_numpy_folder = "MDB-stem-synth/target_vectors_numpy"
 
 
 def test_save_frames_annotations():
@@ -120,8 +115,67 @@ def test_save_frames_annotations():
             group.create_dataset('y_vectors', data=y_vectors)
 
 
-# Flaky plugin to retry training if it fails
-# @flaky(max_runs=230, min_passes=1)
+def test_save_frames_annotations_v2():
+    audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
+    num_files = len(audio_files_list)
+
+    for idx, audio_file in enumerate(audio_files_list):
+        audio_path = os.path.join(audio_folder, audio_file)
+        annotation_path = os.path.join(annotation_folder, audio_file.replace(".wav", ".csv"))
+
+        print(f"\nLoading audio: {audio_file} ({idx + 1}/{num_files})")
+        audio_data = get_audio(audio_path, model_input)
+
+        print("Loading frequency annotations")
+        annotations = pd.read_csv(annotation_path, header=None, names=['timestamp', 'frequency'])
+
+        # Split audio data into frames of 1953 samples
+        print("Splitting audio in frames")
+        frames = librosa.util.frame(audio_data, model_input, hop_length, axis=0)
+        del audio_data
+
+        # Filter frames to get correct annotation for each one
+        print("Sync frames with time annotations")
+        times = annotations['timestamp'].values
+        frame_indexes = librosa.time_to_frames(times, model_srate, hop_length)
+        frames = frames[frame_indexes, :]
+
+        # normalize each frame -- this is expected by the model
+        print("Normalizing frames")
+        frames -= np.mean(frames, axis=1)[:, np.newaxis]
+        frames /= np.clip(np.std(frames, axis=1)[:, np.newaxis], 1e-8, None)
+
+        # Get vector targets for each frequency from annotation
+        print("Get vector targets for each frequency from annotation")
+        frequencies = annotations['frequency'].values
+        y_vectors = f0_to_target_vector(frequencies)
+
+        # Permutation of frames and target vectors
+        print("Permutation of frames and target vectors")
+        permutation = np.random.permutation(len(frames))
+        frames = frames[permutation]
+        y_vectors = y_vectors[permutation]
+
+        # Append frames to h5 file
+        print("Append frames to h5 file")
+        file = os.path.join(frames_target_folder, "dataset.h5")
+        append_audio_frames_to_h5(frames, y_vectors, file)
+
+
+def test_save_frames_annotations_v3():
+    audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
+    num_files = len(audio_files_list)
+
+    for idx, audio_file in enumerate(audio_files_list):
+        print(f"\nLoading audio: {audio_file} ({idx + 1}/{num_files})")
+        frames, y_vectors = load_data_from_hdf5(os.path.join(frames_target_folder, "data.h5"), audio_file.replace(".wav", ""))
+
+        # Append frames to h5 file
+        print("Append frames to h5 file")
+        file = os.path.join(frames_target_folder, "dataset.h5")
+        append_audio_frames_to_h5(frames, y_vectors, file)
+
+
 def test_train():
     audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
     audio_files_used_list = pd.read_csv(audio_files_used_to_train, header=None, names=['audio_name'])['audio_name'].values
@@ -189,6 +243,37 @@ def test_train():
 
         number_audio_files -= 1
 
+
+def test_train_random_batches():
+    data_file = os.path.join(frames_target_folder, "data.h5")
+    frames_generator = random_frames_batch_generator(data_file)
+
+    # Train the model
+    try:
+        print("Training the model")
+        model.fit(
+            frames_generator,
+            steps_per_epoch=steps_per_epoch,
+            validation_data=frames_generator,
+            validation_steps=167,
+            # callbacks=[early_stopping, checkpoint, wandb_callback]
+            callbacks=[early_stopping, checkpoint]
+            # callbacks=[early_stopping]
+        )
+
+        # Evaluate the model on the test set
+        print("Evaluating the model")
+        test_loss = model.evaluate(frames_generator, steps=167)
+        print(f"Test Loss: {test_loss}")
+    except:
+        raise Exception("Exception during model training")
+    finally:
+        # Clear the Keras session to release resources
+        print("Cleanup")
+        tf.keras.backend.clear_session()
+
+        # Trigger garbage collection
+        gc.collect()
 
 def data_generator(audio_files, annotation_files):
     files = list(zip(audio_files, annotation_files))
@@ -260,7 +345,7 @@ def get_audio(audio_path, model_input_size=993, model_srate=8000.):
     return audio
 
 
-def f0_to_target_vector(f0, vecSize = 486, fmin = 30., fmax = 1000., returnFreqs = False):
+def f0_to_target_vector(f0, vecSize = 486, fmin = 30., fmax = 1000., returnFreqs = False) -> np.ndarray:
     '''
     convert from target f0 value to target vector of vecSize pitch classes (corresponding to the values in cents_mapping) that is used as output by the CREPE model
     Unlike the original CREPE model, the first class corresponds to a frequency of 0 (for unvoiced segments).
@@ -371,6 +456,73 @@ def load_data_from_hdf5(hdf5_file, audio_name):
             return None, None
 
 
+def random_frames_batch_generator(hdf5_file, batch_size=32):
+    print("Loading dataset")
+    with h5py.File(hdf5_file, 'r') as hf:
+        audio_names = list(hf.keys())
+        last_selected_indices = {audio_name: [] for audio_name in audio_names}
+
+    while True:
+        chosen_audio = np.random.choice(audio_names, size=batch_size, replace=False)
+        selected_frames = []
+        selected_labels = []
+
+        for audio_name in chosen_audio:
+            group = hf[audio_name]
+            frames = np.array(group['frames'])
+            labels = np.array(group['y_vectors'])
+
+            available_indices = np.setdiff1d(np.arange(len(frames)), last_selected_indices[audio_name])
+            if len(available_indices) == 0:
+                available_indices = np.arange(len(frames))
+
+            random_index = np.random.choice(available_indices)
+            last_selected_indices[audio_name].append(random_index)
+
+            selected_frames.append(frames[random_index])
+            selected_labels.append(labels[random_index])
+
+        yield np.array(selected_frames), np.array(selected_labels)
+
+
+def append_audio_frames_to_h5(frames, labels, filename):
+    # Check if the file exists
+    if not os.path.isfile(filename):
+        # Create a new HDF5 file if it doesn't exist
+        with h5py.File(filename, 'w') as hf:
+            hf.create_dataset('frames', data=frames, chunks=True, maxshape=(None, *frames.shape[1:]))
+            hf.create_dataset('labels', data=labels, chunks=True, maxshape=(None, *labels.shape[1:]))
+        print("New HDF5 file created:", filename)
+
+    else:
+        # Open HDF5 file in append mode
+        with h5py.File(filename, 'a') as hf:
+            # Get current length of datasets
+            frames_length = hf['frames'].shape[0]
+            labels_length = hf['labels'].shape[0]
+
+            # Append frames and labels to the existing datasets
+            hf['frames'].resize((frames_length + frames.shape[0]), axis=0)
+            hf['frames'][frames_length:] = frames
+            hf['labels'].resize((labels_length + labels.shape[0]), axis=0)
+            hf['labels'][labels_length:] = labels
+
+        print("Data appended successfully to", filename)
+
+
+def read_audio_frames_from_h5(filename, index):
+    with h5py.File(filename, 'r') as hf:
+        # Check if datasets 'frames' and 'labels' exist
+        if 'frames' not in hf or 'labels' not in hf:
+            raise FileNotFoundError(
+                "Dataset 'frames' or 'labels' not found in the specified HDF5 file.")
+
+        # Read frames and labels from the HDF5 file
+        frame = hf['frames'][index]
+        label = hf['labels'][index]
+
+    return frame, label
+
 def test_save_audio_list():
     audio_files_list = sorted(os.listdir(audio_folder))
 
@@ -379,3 +531,14 @@ def test_save_audio_list():
         csv_writer = csv.writer(csvfile)
         for filename in audio_files_list:
             csv_writer.writerow([filename])
+
+
+def test_create_h5():
+    a = np.array([[1, 2],[3, 4],[5, 6]])
+    b = np.array([[7],[8],[9]])
+
+    append_audio_frames_to_h5(a, b, 'test.h5')
+
+    f, l = read_audio_frames_from_h5('test.h5', 0)
+
+    print(f, l)
