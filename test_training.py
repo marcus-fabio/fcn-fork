@@ -11,6 +11,10 @@ from sklearn.model_selection import train_test_split, KFold
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 import tensorflow as tf
 import h5py
+import wandb
+from wandb.keras import WandbCallback
+
+from models.load_model import load_model
 
 # In your code, before creating any TensorFlow operations
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -26,19 +30,14 @@ if gpus:
     except RuntimeError as e:
         print(e)
 
-# import wandb
-# from wandb.keras import WandbCallback
-
-from models.load_model import load_model
-
 # Load model, including pre trained weights and compile
 model_input = 1953
 print(f"\nLoad FCN model: {model_input}")
 model = load_model(model_input, FULLCONV=False, training=True)
 
 # Initialize W&B
-# wandb.init(project='fcn_retraining', resume=True)
-# wandb_callback = WandbCallback()
+wandb.init(project='fcn_retraining', resume=True, name="random-frames")
+wandb_callback = WandbCallback()
 
 # Set up early stopping callback
 early_stopping = EarlyStopping(monitor='loss', patience=32, min_delta=0.001)
@@ -47,10 +46,11 @@ early_stopping = EarlyStopping(monitor='loss', patience=32, min_delta=0.001)
 checkpoint_path = f"models/FCN_1953/new_weights.h5"
 checkpoint = ModelCheckpoint(checkpoint_path, monitor='val_loss',
                              save_best_only=True, mode='min',
-                             restore_best_weights=True)
+                             restore_best_weights=True,
+                             save_weights_only=True)
 
 batch_size = 32
-steps_per_epoch = 500
+steps_per_epoch = 10
 epochs = 500
 model_srate = 8000.
 step_size = 2.902
@@ -63,6 +63,7 @@ retry = 1
 audio_folder = 'MDB-stem-synth/audio_stems'
 annotation_folder = 'MDB-stem-synth/annotation_stems'
 frames_target_folder = "D:/MDB-stem-synth/frames_targets"
+last_frame_index_file = "last_frame_index.csv"
 
 
 def test_save_frames_annotations():
@@ -74,7 +75,7 @@ def test_save_frames_annotations():
         audio_path = os.path.join(audio_folder, audio_file)
         annotation_path = os.path.join(annotation_folder, audio_file.replace(".wav", ".csv"))
 
-        print(f"\nLoading audio: {audio_file} ({idx + 1}/{num_files})")
+        print(f"Loading audio: {audio_file} ({idx + 1}/{num_files})")
         audio_data = get_audio(audio_path, model_input)
 
         print("Loading frequency annotations")
@@ -244,36 +245,92 @@ def test_train():
         number_audio_files -= 1
 
 
-def test_train_random_batches():
-    data_file = os.path.join(frames_target_folder, "data.h5")
-    frames_generator = random_frames_batch_generator(data_file)
+def test_train_v2():
+    print("\nLoading dataset")
+    with h5py.File(os.path.join(frames_target_folder, "dataset.h5"), 'r') as data:
+        total_frames = len(data['frames'])
+        slice_size = 100000
+        total_slices = (total_frames + slice_size - 1) // slice_size
+        last_index = get_last_frame_index(last_frame_index_file)
+        frames_restart_index = last_index + slice_size
 
-    # Train the model
-    try:
-        print("Training the model")
-        model.fit(
-            frames_generator,
-            steps_per_epoch=steps_per_epoch,
-            validation_data=frames_generator,
-            validation_steps=167,
-            # callbacks=[early_stopping, checkpoint, wandb_callback]
-            callbacks=[early_stopping, checkpoint]
-            # callbacks=[early_stopping]
-        )
+        # Loop through the dataset in slices
+        for start_index in range(frames_restart_index, total_frames, slice_size):
+            # Determine the start and end indices for the current slice
+            end_index = min(start_index + slice_size - 1, total_frames)
 
-        # Evaluate the model on the test set
-        print("Evaluating the model")
-        test_loss = model.evaluate(frames_generator, steps=167)
-        print(f"Test Loss: {test_loss}")
-    except:
-        raise Exception("Exception during model training")
-    finally:
-        # Clear the Keras session to release resources
-        print("Cleanup")
-        tf.keras.backend.clear_session()
+            # Fetch the slice of data from the dataset
+            print("Get frames slice")
+            frames = data['frames'][start_index:end_index]
 
-        # Trigger garbage collection
-        gc.collect()
+            print("Get y_vectors slice")
+            y_vectors = data['labels'][start_index:end_index]
+
+            # Permutation of frames and target vectors
+            print("Permutation of frames and target vectors")
+            permutation = np.random.permutation(len(frames))
+            frames = frames[permutation]
+            y_vectors = y_vectors[permutation]
+
+            # Create a KFold object
+            kf = KFold(n_splits=num_folds, shuffle=True, random_state=42)
+
+            for fold_idx, (train_index, test_index) in enumerate(kf.split(frames)):
+                slice_number = start_index // slice_size + 1
+                percentage_frames_used = frames_restart_index / total_frames * 100
+
+                print(f"\nFold {fold_idx + 1}/{num_folds}")
+                print(f"Frame index reference: {frames_restart_index}")
+                print(f"Frames slice size: {slice_size}")
+                print(f"Current frames slice: {slice_number}/{total_slices}")
+                print(f"Percentage of frames used: {percentage_frames_used:.2f}%")
+
+                print("Get train frames")
+                x_train = frames[train_index]
+
+                print("Get test frames")
+                x_test = frames[test_index]
+
+                print("Get train y_vectors")
+                y_train = y_vectors[train_index]
+
+                print("Get test y_vectors")
+                y_test = y_vectors[test_index]
+
+                # Split the training set into train and validation (60/20/20 split)
+                print("Get train/val frames and y_vectors")
+                x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.25, random_state=42)
+
+                # Train the model
+                try:
+                    print("Training the model")
+                    model.fit(
+                        x_train, y_train,
+                        steps_per_epoch=steps_per_epoch,
+                        batch_size=batch_size,
+                        validation_data=(x_val, y_val),
+                        callbacks=[early_stopping, checkpoint, wandb_callback]
+                        # callbacks=[early_stopping, checkpoint]
+                        # # callbacks=[early_stopping]
+                    )
+
+                    # Evaluate the model on the test set
+                    print("Evaluating the model")
+                    test_loss = model.evaluate(x_test, y_test)
+                    print(f"Test Loss: {test_loss}")
+                except:
+                    raise Exception("Exception during model training")
+                finally:
+                    # Clear the Keras session to release resources
+                    print("Cleanup")
+                    tf.keras.backend.clear_session()
+                    del x_train, x_val, x_test, y_train, y_val, y_test
+
+                    # Trigger garbage collection
+                    gc.collect()
+
+            save_last_frame_index(start_index, last_frame_index_file)
+
 
 def data_generator(audio_files, annotation_files):
     files = list(zip(audio_files, annotation_files))
@@ -523,22 +580,30 @@ def read_audio_frames_from_h5(filename, index):
 
     return frame, label
 
+
 def test_save_audio_list():
     audio_files_list = sorted(os.listdir(audio_folder))
 
-    # Write the filenames to a CSV file
     with open('audio_list.csv', 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         for filename in audio_files_list:
             csv_writer.writerow([filename])
 
 
-def test_create_h5():
-    a = np.array([[1, 2],[3, 4],[5, 6]])
-    b = np.array([[7],[8],[9]])
+def save_last_frame_index(number, filename):
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([number])
 
-    append_audio_frames_to_h5(a, b, 'test.h5')
 
-    f, l = read_audio_frames_from_h5('test.h5', 0)
+def get_last_frame_index(filename):
+    with open(filename, 'r', newline='') as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            return int(row[0])
 
-    print(f, l)
+
+def test_frame_index():
+    print("first index", get_last_frame_index(last_frame_index_file))
+    save_last_frame_index(2, last_frame_index_file)
+    print("last index", get_last_frame_index(last_frame_index_file))

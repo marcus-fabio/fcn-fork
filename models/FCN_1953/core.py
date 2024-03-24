@@ -11,7 +11,7 @@ modified by Luc Ardaillon: 16/04/2019
 # the model is trained on 8kHz audio
 model_srate = 8000
 
-def build_model(learning_rate=0.0002, weightsFile=None, inputSize=1953, dropout = 0, training = False):
+def build_model(learning_rate=0.0002, weightsFile=None, inputSize=1953, training=False):
     '''
     :param learning_rate:
     :param weightsFile:
@@ -44,7 +44,7 @@ def build_model(learning_rate=0.0002, weightsFile=None, inputSize=1953, dropout 
             y = MaxPool2D(pool_size=(2, 1), strides=None, padding='valid', name="conv%d-maxpool" % l)(y)
 
         y = BatchNormalization(name="conv%d-BN" % l)(y)
-        if(dropout and training):
+        if(training):
             y = Dropout(0.25, name="conv%d-dropout" % l)(y)
 
     # here replaced the fully-connected layer by a convolutional one:
