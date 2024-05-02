@@ -63,7 +63,7 @@ def build_model(learning_rate=0.0002, weightsFile=None, inputSize=1953, training
         for layer in model.layers:
             layer.trainable = True
 
-    model.compile(optimizer=optimizers.Adam(lr=learning_rate), loss='binary_crossentropy')
+    model.compile(optimizer=optimizers.Adam(learning_rate=learning_rate), loss='binary_crossentropy')
 
     return model
 

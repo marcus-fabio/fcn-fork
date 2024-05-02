@@ -5,7 +5,8 @@ def train_cnn():
     while True:
         try:
             # Run your CNN training command using subprocess
-            subprocess.run(['pytest', 'test_training.py::test_train'], check=True)
+            # cmd = ['runas', '/env', '/user:fabio', 'pytest test_training.py::test_train_v2']
+            subprocess.run(['pytest', 'test_training.py::test_train_v2'], check=True)
         except subprocess.CalledProcessError as e:
             # If an error occurs (e.g., memory error), print the error and restart the training
             print(f"Error occurred: {e}. Restarting training...")

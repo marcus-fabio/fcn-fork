@@ -8,11 +8,12 @@ import numpy as np
 import pandas as pd
 import librosa
 from sklearn.model_selection import train_test_split, KFold
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.callbacks import EarlyStopping, ModelCheckpoint, LearningRateScheduler, ReduceLROnPlateau
 import tensorflow as tf
+from keras import optimizers
 import h5py
 import wandb
-from wandb.keras import WandbCallback
+# from wandb.keras import WandbCallback
 
 from models.load_model import load_model
 
@@ -36,11 +37,11 @@ print(f"\nLoad FCN model: {model_input}")
 model = load_model(model_input, FULLCONV=False, training=True)
 
 # Initialize W&B
-wandb.init(project='fcn_retraining', resume=True, name="random-frames")
-wandb_callback = WandbCallback()
+# wandb.init(project='fcn_retraining', resume=True, name="random-frames")
+# wandb_callback = WandbCallback()
 
 # Set up early stopping callback
-early_stopping = EarlyStopping(monitor='loss', patience=32, min_delta=0.001)
+early_stopping = EarlyStopping(monitor='loss', patience=32, restore_best_weights=True, min_delta=0.001)
 
 # Set up ModelCheckpoint callback to save the best weights
 checkpoint_path = f"models/FCN_1953/new_weights.h5"
@@ -50,11 +51,17 @@ checkpoint = ModelCheckpoint(checkpoint_path, monitor='val_loss',
                              save_weights_only=True)
 
 batch_size = 32
-steps_per_epoch = 10
-epochs = 500
+steps_per_epoch = 2
+epochs = 5
 model_srate = 8000.
-step_size = 2.902
-hop_length = int(model_srate * step_size / 1000)
+dataset_sampling_rate = 44100.
+dataset_frame_size = 1024
+dataset_hop_size = 128
+dataset_frame_size_seconds = dataset_frame_size / dataset_sampling_rate
+dataset_hop_size_seconds = dataset_hop_size / dataset_sampling_rate
+dataset_frame_size_resampled = int(model_srate * dataset_frame_size_seconds)
+dataset_hop_size_resampled = int(model_srate * dataset_hop_size_seconds)
+hop_length = int(model_srate * dataset_hop_size_seconds)
 num_folds = 5
 audio_files_used_to_train = "audio_files_used_to_train.csv"
 audio_list = "audio_list.csv"
@@ -66,6 +73,7 @@ frames_target_folder = "D:/MDB-stem-synth/frames_targets"
 last_frame_index_file = "last_frame_index.csv"
 
 
+# Save frames by audio name
 def test_save_frames_annotations():
     audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
     num_files = len(audio_files_list)
@@ -116,6 +124,7 @@ def test_save_frames_annotations():
             group.create_dataset('y_vectors', data=y_vectors)
 
 
+# Save frames into unique numpy array containing all audios
 def test_save_frames_annotations_v2():
     audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
     num_files = len(audio_files_list)
@@ -177,6 +186,62 @@ def test_save_frames_annotations_v3():
         append_audio_frames_to_h5(frames, y_vectors, file)
 
 
+def test_save_frames_annotations_v4():
+    audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
+    num_files = len(audio_files_list)
+
+    for idx, audio_file in enumerate(audio_files_list):
+        audio_name = audio_file.replace(".wav", "")
+        audio_path = os.path.join(audio_folder, audio_file)
+        annotation_path = os.path.join(annotation_folder, audio_file.replace(".wav", ".csv"))
+
+        print(f"Loading audio: {audio_file} ({idx + 1}/{num_files})")
+        audio_samples, _ = librosa.load(audio_path, None)
+
+        print(f"Resampling audio: {dataset_sampling_rate} -> {model_srate}")
+        audio_samples = librosa.resample(audio_samples, dataset_sampling_rate, model_srate)
+
+        print(f"Padding audio to center frames")
+        audio_samples = librosa.util.pad_center(audio_samples, audio_samples.size + dataset_frame_size_resampled)
+
+        # Split audio data into frames of 1024 samples (original dataset frame size)
+        print("Splitting audio in frames")
+        frames = librosa.util.frame(audio_samples, dataset_frame_size_resampled, dataset_hop_size_resampled, axis=0)
+        del audio_samples
+
+        print("Loading frequency annotations")
+        annotations = pd.read_csv(annotation_path, header=None, names=['timestamp', 'frequency'])
+
+        # Filter frames to get correct annotation for each one
+        print("Sync frames with time annotations")
+        times = annotations['timestamp'].values
+        frame_indexes = librosa.time_to_frames(times, model_srate, hop_length)
+        frames = frames[frame_indexes, :]
+
+        # normalize each frame -- this is expected by the model
+        print("Normalizing frames")
+        frames -= np.mean(frames, axis=1)[:, np.newaxis]
+        frames /= np.clip(np.std(frames, axis=1)[:, np.newaxis], 1e-8, None)
+
+        # Get vector targets for each frequency from annotation
+        print("Get vector targets for each frequency from annotation")
+        frequencies = annotations['frequency'].values
+        y_vectors = f0_to_target_vector(frequencies)
+
+        # Create or open the HDF5 file
+        with h5py.File(os.path.join(frames_target_folder, "data.h5"), 'a') as hf:
+            # Create a group for each audio file (if it doesn't exist)
+            if audio_name not in hf:
+                group = hf.create_group(audio_name)
+            else:
+                group = hf[audio_name]
+
+            # Save frames and target vectors to the group
+            print("Saving frames and target vector to hdf5 file")
+            group.create_dataset('frames', data=frames)
+            group.create_dataset('y_vectors', data=y_vectors)
+
+
 def test_train():
     audio_files_list = pd.read_csv(audio_list, header=None, names=['audio_name'])['audio_name'].values
     audio_files_used_list = pd.read_csv(audio_files_used_to_train, header=None, names=['audio_name'])['audio_name'].values
@@ -216,14 +281,17 @@ def test_train():
                     batch_size=batch_size,
                     validation_data=(x_val, y_val),
                     # callbacks=[early_stopping, checkpoint, wandb_callback]
-                    callbacks=[early_stopping, checkpoint]
-                    # callbacks=[early_stopping]
+                    # callbacks=[early_stopping, checkpoint]
+                    callbacks=[early_stopping]
                 )
 
                 # Evaluate the model on the test set
-                print("Evaluating the model")
-                test_loss = model.evaluate(x_test, y_test)
-                print(f"Test Loss: {test_loss}")
+                # print("Evaluating the model")
+                # test_loss = model.evaluate(x_test, y_test)
+                # print(f"Test Loss: {test_loss}")
+
+                print("Saving new weights")
+                model.save_weights(checkpoint_path)
             except:
                 raise Exception("Exception during model training")
             finally:
@@ -275,15 +343,15 @@ def test_train_v2():
             # Create a KFold object
             kf = KFold(n_splits=num_folds, shuffle=True, random_state=42)
 
-            for fold_idx, (train_index, test_index) in enumerate(kf.split(frames)):
+            for fold_idx, (train_index, test_index) in enumerate(kf.split(range(26667))):
                 slice_number = start_index // slice_size + 1
-                percentage_frames_used = frames_restart_index / total_frames * 100
+                percentage_completed = (slice_number - 1) / total_slices * 100
 
                 print(f"\nFold {fold_idx + 1}/{num_folds}")
-                print(f"Frame index reference: {frames_restart_index}")
+                print(f"Frame index reference: {start_index}")
                 print(f"Frames slice size: {slice_size}")
                 print(f"Current frames slice: {slice_number}/{total_slices}")
-                print(f"Percentage of frames used: {percentage_frames_used:.2f}%")
+                print(f"Training completed: {percentage_completed:.2f}%")
 
                 print("Get train frames")
                 x_train = frames[train_index]
@@ -309,8 +377,8 @@ def test_train_v2():
                         steps_per_epoch=steps_per_epoch,
                         batch_size=batch_size,
                         validation_data=(x_val, y_val),
-                        callbacks=[early_stopping, checkpoint, wandb_callback]
-                        # callbacks=[early_stopping, checkpoint]
+                        # callbacks=[early_stopping, checkpoint, wandb_callback]
+                        callbacks=[early_stopping, checkpoint]
                         # # callbacks=[early_stopping]
                     )
 
@@ -397,12 +465,12 @@ def get_audio(audio_path, model_input_size=993, model_srate=8000.):
         audio = resample(audio, sr, model_srate)
 
     # pad so that frames are centered around their timestamps (i.e. first frame is zero centered).
-    audio = np.pad(audio, int(model_input_size//2), mode='constant', constant_values=0)
+    audio = np.pad(audio, int(model_input_size // 2), mode='constant', constant_values=0)
 
     return audio
 
 
-def f0_to_target_vector(f0, vecSize = 486, fmin = 30., fmax = 1000., returnFreqs = False) -> np.ndarray:
+def f0_to_target_vector(f0, vecSize = 486, fmin = 30., fmax = 1000., returnFreqs = False):
     '''
     convert from target f0 value to target vector of vecSize pitch classes (corresponding to the values in cents_mapping) that is used as output by the CREPE model
     Unlike the original CREPE model, the first class corresponds to a frequency of 0 (for unvoiced segments).
@@ -592,8 +660,14 @@ def test_save_audio_list():
 
 def save_last_frame_index(number, filename):
     with open(filename, 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([number])
+        if number is None:
+            # If number is None, erase the file
+            with open(filename, 'w', newline=''):
+                pass  # This will truncate the file, effectively erasing its contents
+        else:
+            with open(filename, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow([number])
 
 
 def get_last_frame_index(filename):
