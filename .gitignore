@@ -116,3 +116,4 @@ venv.bak/
 /examples/DTB/PAN-synth/audio/noTransp/f1_row_straight.wav
 /examples/DTB/PAN-synth/audio/noTransp/f1_row_vibrato.wav
 /models/FCN_1953/new_weights.h5
+*.png
